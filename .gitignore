@@ -32,3 +32,15 @@
 *.app
 
 build
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+
+# Logs and environment
+*.log
+.env*
