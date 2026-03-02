@@ -2,3 +2,12 @@
 server_ip = "127.0.0.1"
 server_port = 8888
 backlog = 256
+
+# Uncomment and fill in to enable gRPC engine cluster management.
+# If this section is absent, ncxs starts in standalone mode (no cluster registration).
+# [engine_proxy]
+# proxy_endpoint     = "127.0.0.1:50051"   # gRPC address of the engine proxy
+# engine_id          = "engine-01"          # unique engine identifier
+# engine_address     = "203.0.113.5:8888"  # this engine's public address
+# max_capacity       = 100                  # max concurrent proxy bridges
+# heartbeat_interval = 10                  # heartbeat period in seconds

@@ -34,7 +34,44 @@ message(STATUS "Using Protobuf ${Protobuf_VERSION}")
 message(STATUS "Protobuf include dirs: ${Protobuf_INCLUDE_DIRS}")
 message(STATUS "Protobuf libraries: ${Protobuf_LIBRARIES}")
 
-# module 
+# gRPC (linked to ncxs only)
+find_package(gRPC CONFIG QUIET)
+if(gRPC_FOUND)
+    set(GRPC_TARGETS gRPC::grpc++)
+    set(GRPC_CPP_PLUGIN_EXEC $<TARGET_FILE:gRPC::grpc_cpp_plugin>)
+    message(STATUS "Using gRPC ${gRPC_VERSION} via find_package")
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GRPC REQUIRED IMPORTED_TARGET grpc++)
+    set(GRPC_TARGETS PkgConfig::GRPC)
+    find_program(GRPC_CPP_PLUGIN_EXEC grpc_cpp_plugin REQUIRED)
+    message(STATUS "Using gRPC via pkg-config")
+endif()
+
+# Generate gRPC C++ sources from engine-cluster-stream.proto at build time
+set(GRPC_PROTO_FILE "${CMAKE_CURRENT_SOURCE_DIR}/protocol/engine-cluster-stream.proto")
+set(GRPC_GENERATED_SRCS
+    "${CMAKE_CURRENT_SOURCE_DIR}/protocol/engine_cluster_stream.pb.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/protocol/engine_cluster_stream.grpc.pb.cc"
+)
+set(GRPC_GENERATED_HDRS
+    "${CMAKE_CURRENT_SOURCE_DIR}/protocol/engine_cluster_stream.pb.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/protocol/engine_cluster_stream.grpc.pb.h"
+)
+add_custom_command(
+    OUTPUT ${GRPC_GENERATED_SRCS} ${GRPC_GENERATED_HDRS}
+    COMMAND ${Protobuf_PROTOC_EXECUTABLE}
+        "--cpp_out=${CMAKE_CURRENT_SOURCE_DIR}/protocol"
+        "--grpc_out=${CMAKE_CURRENT_SOURCE_DIR}/protocol"
+        "--plugin=protoc-gen-grpc=${GRPC_CPP_PLUGIN_EXEC}"
+        "-I${CMAKE_CURRENT_SOURCE_DIR}/protocol"
+        "${GRPC_PROTO_FILE}"
+    DEPENDS "${GRPC_PROTO_FILE}"
+    COMMENT "Generating gRPC C++ sources from engine-cluster-stream.proto"
+    VERBATIM
+)
+
+# module
 include_directories(
     cli
     util
@@ -72,10 +109,11 @@ aux_source_directory(ncx_server NCX_SERVER)
 aux_source_directory(protocol PROTOCOL)
 aux_source_directory(cli CLI)
 
-# src 
+# src
 file(GLOB NCXS "ncx_server/ncxs.cpp")
 file(GLOB NCXC "ncx_client/ncxc.cpp")
-add_executable(ncxs ${NCXS} ${NET} ${UTIL} ${NCX_SERVER} ${PROTOCOL} ${CLI})
+# ncxs includes gRPC-generated sources explicitly (generated at build time, not picked up by aux_source_directory)
+add_executable(ncxs ${NCXS} ${NET} ${UTIL} ${NCX_SERVER} ${PROTOCOL} ${CLI} ${GRPC_GENERATED_SRCS})
 add_executable(ncxc ${NCXC} ${NET} ${UTIL} ${NCX_CLIENT} ${PROTOCOL} ${CLI})
 
 # link boost
@@ -97,3 +135,6 @@ target_link_libraries(ncxs ${Protobuf_LIBRARIES})
 # link libevent
 target_link_libraries(ncxc ${LIBEVENT_TARGETS})
 target_link_libraries(ncxs ${LIBEVENT_TARGETS})
+
+# link gRPC to ncxs only (not ncxc)
+target_link_libraries(ncxs ${GRPC_TARGETS})

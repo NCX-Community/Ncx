@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pwsh:*)"
+      "Bash(pwsh:*)",
+      "Bash(powershell -File \".specify/scripts/powershell/create-new-feature.ps1\" -Json -Number 1 -ShortName \"grpc-engine-cluster\" \"Engine Cluster Management: engine registration, deregistration, heartbeat, and proxy port query via gRPC persistent stream connection between NCX engine and engine proxy\")",
+      "Bash(powershell -File \".specify/scripts/powershell/setup-plan.ps1\" -Json)",
+      "Bash(powershell -File \".specify/scripts/powershell/update-agent-context.ps1\" -AgentType claude)",
+      "Bash(powershell -File \".specify/scripts/powershell/check-prerequisites.ps1\" -Json)"
     ]
   }
 }

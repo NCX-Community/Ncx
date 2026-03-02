@@ -4,8 +4,9 @@
 #include "singleton.h"
 #include "nserver.h"
 #include "nclient.h"
+#include "engine_proxy_config.h"
 
-// #define TOML_EXCEPTIONS 0 
+// #define TOML_EXCEPTIONS 0
 
 class Config
 {
@@ -79,6 +80,51 @@ public:
             // 捕获所有可能的异常，并输出错误信息
             std::cerr << "Error: " << e.what() << std::endl;
             exit(1); // 退出程序，避免继续执行无效状态
+        }
+    }
+
+    /// Parse the optional [engine_proxy] section.
+    /// Returns std::nullopt if the section is absent (standalone / backward-compatible mode).
+    std::optional<EngineProxyConfig> parseEngineProxyConfig() {
+        try {
+            toml::table* table = config.as_table();
+            if (!table) return std::nullopt;
+
+            auto ep_node = table->at_path("engine_proxy");
+            if (!ep_node || !ep_node.is_table()) return std::nullopt;
+
+            auto ep_table = ep_node.as_table();
+
+            auto endpoint_node = ep_table->at_path("proxy_endpoint");
+            if (!endpoint_node || !endpoint_node.is_string())
+                throw std::runtime_error("[engine_proxy.proxy_endpoint] is missing or not a string");
+
+            auto engine_id_node = ep_table->at_path("engine_id");
+            if (!engine_id_node || !engine_id_node.is_string())
+                throw std::runtime_error("[engine_proxy.engine_id] is missing or not a string");
+
+            auto engine_addr_node = ep_table->at_path("engine_address");
+            if (!engine_addr_node || !engine_addr_node.is_string())
+                throw std::runtime_error("[engine_proxy.engine_address] is missing or not a string");
+
+            auto max_cap_node = ep_table->at_path("max_capacity");
+            if (!max_cap_node || !max_cap_node.is_integer())
+                throw std::runtime_error("[engine_proxy.max_capacity] is missing or not an integer");
+
+            EngineProxyConfig cfg;
+            cfg.proxy_endpoint  = endpoint_node.as_string()->get();
+            cfg.engine_id       = engine_id_node.as_string()->get();
+            cfg.engine_address  = engine_addr_node.as_string()->get();
+            cfg.max_capacity    = static_cast<int32_t>(max_cap_node.as_integer()->get());
+
+            auto hb_node = ep_table->at_path("heartbeat_interval");
+            if (hb_node && hb_node.is_integer())
+                cfg.heartbeat_interval = static_cast<int>(hb_node.as_integer()->get());
+
+            return cfg;
+        } catch (const std::exception& e) {
+            std::cerr << "Error parsing [engine_proxy]: " << e.what() << std::endl;
+            exit(1);
         }
     }
 };

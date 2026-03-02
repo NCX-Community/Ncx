@@ -25,8 +25,8 @@ main(int argc, char* argv[])
     evthread_use_pthreads();
 
     std::cout << DRAW_S << std::endl;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
-    // read server config 
+    // read server config
     ServerConfig config(argv[1]);
-    NServer ncxs(config.parseAsServerArgs());
+    NServer ncxs(config.parseAsServerArgs(), config.parseEngineProxyConfig());
     ncxs.run_server();
 }

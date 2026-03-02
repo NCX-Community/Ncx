@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package enginecluster.v1;
+
+// Edge contract between the SERVER engine_proxy service (Go) and
+// external engine processes (C++). This is not a Kitex inter-service
+// contract; it is a gRPC streaming interface.
+
+option go_package = "github.com/NCX-Community/SERVER/svr/plt/engine_proxy/internal/engineclusterpb";
+
+service EngineClusterStream {
+  // Establish a bidirectional streaming session between a single engine
+  // process and the engine_proxy service.
+  rpc Connect (stream EngineMessage) returns (stream ProxyMessage) {}
+}
+
+// Messages flowing from Engine (C++) to engine_proxy (Go).
+message EngineMessage {
+  oneof payload {
+    EngineRegistration registration = 1;
+    EngineHeartbeat heartbeat = 2;
+    CapacityReport capacity_report = 3;
+  }
+}
+
+message EngineRegistration {
+  string engine_id = 1; // Unique engine identifier
+  string address = 2; // "ip:port" access address
+  int32 max_capacity = 3; // Declared maximum concurrent proxy addresses
+}
+
+message EngineHeartbeat {
+  string engine_id = 1;
+  int32 active_proxy_count = 2; // Current number of active proxy addresses
+}
+
+message CapacityReport {
+  string engine_id = 1;
+  int32 max_capacity = 2;
+  int32 active_proxy_count = 3;
+}
+
+// Messages flowing from engine_proxy (Go) to Engine (C++).
+message ProxyMessage {
+  oneof payload {
+    CapacityRequest capacity_request = 1;
+    CapacityResponse capacity_response = 2;
+  }
+}
+
+message CapacityRequest {
+  string request_id = 1; // Correlates request/response
+}
+
+message CapacityResponse {
+  string request_id = 1;
+  int32 available_capacity = 2; // Remaining proxy ports engine can accept
+}

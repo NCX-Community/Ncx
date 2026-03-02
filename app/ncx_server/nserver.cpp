@@ -1,19 +1,56 @@
 #include "nserver.h"
+#include "grpc_engine_client.h"
 
 
-NServer::NServer(ServerArgs args) :
+NServer::NServer(ServerArgs args, std::optional<EngineProxyConfig> grpc_cfg) :
     args_(args)
 {
     // 资源创建
     loop_ = std::make_unique<EventLoop>();
     ncx_acceptor_ = std::make_unique<Server>(loop_.get(), args_.server_addr_, args_.backlog_);
     sc_map_ = std::make_unique<SControlChannelMap>();
-                                       
+
     // 绑定初始连接的读事件回调--握手阶段
-    ncx_acceptor_->bind_on_message(std::bind(&NServer::handle_new_connection, this, std::placeholders::_1, std::placeholders::_2));    
+    ncx_acceptor_->bind_on_message(std::bind(&NServer::handle_new_connection, this, std::placeholders::_1, std::placeholders::_2));
+
+    // Start gRPC engine client if [engine_proxy] config is present
+    if (grpc_cfg.has_value()) {
+        GrpcEngineClient::Config client_cfg{
+            grpc_cfg->proxy_endpoint,
+            grpc_cfg->engine_id,
+            grpc_cfg->engine_address,
+            grpc_cfg->max_capacity,
+            grpc_cfg->heartbeat_interval
+        };
+        grpc_client_ = std::make_unique<GrpcEngineClient>(std::move(client_cfg), this);
+        grpc_client_->start();
+    }
 }
 
-void NServer::handle_new_connection(std::shared_ptr<Connection> origin_conn, Buffer* conn_input_buf) 
+NServer::~NServer()
+{
+    if (grpc_client_) grpc_client_->stop();
+}
+
+void NServer::on_bridge_opened()
+{
+    std::lock_guard<std::mutex> lock(snapshot_.mu);
+    snapshot_.active_proxy_count++;
+}
+
+void NServer::on_bridge_closed()
+{
+    std::lock_guard<std::mutex> lock(snapshot_.mu);
+    if (snapshot_.active_proxy_count > 0) snapshot_.active_proxy_count--;
+}
+
+int NServer::get_active_proxy_count()
+{
+    std::lock_guard<std::mutex> lock(snapshot_.mu);
+    return snapshot_.active_proxy_count;
+}
+
+void NServer::handle_new_connection(std::shared_ptr<Connection> origin_conn, Buffer* conn_input_buf)
 {
     uint32_t msg_len = PROTOMSGUTIL::CanReadMsg(conn_input_buf);
     if(!msg_len) return;
@@ -29,8 +66,8 @@ void NServer::handle_new_connection(std::shared_ptr<Connection> origin_conn, Buf
         case protocol::Hello::CONTROL_CHANNEL_HELLO :
             std::puts("RECV CONTROL_CHANNEL_HELLO");
             // handle control channel hello
-            handle_control_channel_hello(origin_conn, 
-                                         hello.control_channel_hello_content().service_name(), 
+            handle_control_channel_hello(origin_conn,
+                                         hello.control_channel_hello_content().service_name(),
                                          static_cast<uint16_t>(hello.control_channel_hello_content().proxy_port()));
             break;
         case protocol::Hello::DATA_CHANNEL_HELLO :
@@ -57,7 +94,7 @@ void NServer::handle_control_channel_hello(std::shared_ptr<Connection> origin_co
     std::puts("SERVER SEND CONTROL_CHANNEL_HELLO");
 
     // create control channel ;
-    SControlChannelArgs sargs 
+    SControlChannelArgs sargs
     {
         InetAddress(args_.server_addr_.get_ip(), proxy_port),
         256
@@ -70,7 +107,7 @@ void NServer::handle_control_channel_hello(std::shared_ptr<Connection> origin_co
 void NServer::handle_data_channel_hello(std::shared_ptr<Connection> origin_conn, std::string nonce)
 {
     // 找到数据通道所属的控制通道
-    SControlChannel* s_control_channel = sc_map_->at(nonce).get(); 
+    SControlChannel* s_control_channel = sc_map_->at(nonce).get();
     // 从待处理外界连接池中取出一个外界连接建立转发关系
     std::shared_ptr<Connection> visitor = s_control_channel->pop_visitor();
 
@@ -98,12 +135,13 @@ void NServer::handle_data_channel_hello(std::shared_ptr<Connection> origin_conn,
         }
     );
 
-    // 注册 bridge closer 
+    // 注册 bridge closer — wire on_bridge_closed into the delete callback
     std::shared_ptr<BridgeCloser> bridge_closer = std::make_shared<BridgeCloser>(visitor, origin_conn);
     bridge_closer->set_delete_bridge(
-        [s_control_channel](std::string bridge_id)
+        [this, s_control_channel](std::string bridge_id)
         {
             s_control_channel->erase_bridge_closer(bridge_id);
+            on_bridge_closed();
         }
     );
     std::weak_ptr<BridgeCloser> bridge_closer_weak = bridge_closer;
@@ -123,6 +161,7 @@ void NServer::handle_data_channel_hello(std::shared_ptr<Connection> origin_conn,
     );
 
     s_control_channel->register_bridge_closer(bridge_closer->get_bridge_id(), bridge_closer);
+    on_bridge_opened();  // T007: notify snapshot that a bridge has been registered
 
     // 通知控制通道，数据通道已经建立 / send start tcp transforward
     protocol::DataChannelCmd data_channel_cmd;

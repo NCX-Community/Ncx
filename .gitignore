@@ -44,3 +44,9 @@ Thumbs.db
 # Logs and environment
 *.log
 .env*
+
+# gRPC-generated protobuf files (generated at build time by add_custom_command)
+app/protocol/engine_cluster_stream.pb.h
+app/protocol/engine_cluster_stream.pb.cc
+app/protocol/engine_cluster_stream.grpc.pb.h
+app/protocol/engine_cluster_stream.grpc.pb.cc
